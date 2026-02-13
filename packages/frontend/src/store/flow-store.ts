@@ -171,6 +171,8 @@ export interface FlowState {
   addNode: (node: Node<FlowNodeData>) => void;
   updateNodeData: (nodeId: string, data: Partial<FlowNodeData>) => void;
   removeNode: (nodeId: string) => void;
+  // Rename a node id safely, updating edges and internal references
+  renameNode: (oldId: string, newId: string) => void;
 
   selectNode: (nodeId: string | null) => void;
 
@@ -379,6 +381,62 @@ export const useFlowStore = create<FlowState>()(
           selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId,
           hasUnsavedChanges: true,
         })),
+
+      renameNode: (oldId, newId) => {
+        if (!oldId || !newId || oldId === newId) return;
+
+        set((state) => {
+          // Prevent duplicate ids
+          if (state.nodes.some((n) => n.id === newId)) {
+            throw new Error(`Node id '${newId}' already exists`);
+          }
+
+          const nodes = state.nodes.map((n) => (n.id === oldId ? { ...n, id: newId } : n));
+
+          const edges = state.edges.map((e) => {
+            const source = e.source === oldId ? newId : e.source;
+            const target = e.target === oldId ? newId : e.target;
+            // update id string if it contains the node id
+            const id = typeof e.id === 'string' ? e.id.replaceAll(oldId, newId) : e.id;
+            return { ...e, id, source, target };
+          });
+
+          // Update selected / active / execution state references
+          const selectedNodeId = state.selectedNodeId === oldId ? newId : state.selectedNodeId;
+          const activeNodeId = state.activeNodeId === oldId ? newId : state.activeNodeId;
+          const executionPath = state.executionPath.map((id) => (id === oldId ? newId : id));
+          const traceExecutionPath = state.traceExecutionPath.map((id) => (id === oldId ? newId : id));
+
+          // Update trace timestamps map
+          const traceTimestamps: Record<string, string> = { ...state.traceTimestamps };
+          if (traceTimestamps[oldId]) {
+            traceTimestamps[newId] = traceTimestamps[oldId];
+            delete traceTimestamps[oldId];
+          }
+
+          // Update nodeErrors map keys
+          const newNodeErrors = new Map<string, NodeValidationError[]>();
+          for (const [key, val] of state.nodeErrors.entries()) {
+            if (key === oldId) {
+              newNodeErrors.set(newId, val as NodeValidationError[]);
+            } else {
+              newNodeErrors.set(key, val as NodeValidationError[]);
+            }
+          }
+
+          return {
+            nodes,
+            edges,
+            selectedNodeId,
+            activeNodeId,
+            executionPath,
+            traceExecutionPath,
+            traceTimestamps,
+            nodeErrors: newNodeErrors,
+            hasUnsavedChanges: true,
+          };
+        });
+      },
 
       selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
 

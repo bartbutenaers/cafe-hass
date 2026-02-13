@@ -1,6 +1,7 @@
 import type { FlowNode } from '@cafe/shared';
 import { Trash2 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { FormField } from '@/components/forms/FormField';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,7 @@ export function PropertyPanel() {
   const nodes = useFlowStore((s) => s.nodes);
   const updateNodeData = useFlowStore((s) => s.updateNodeData);
   const removeNode = useFlowStore((s) => s.removeNode);
+  const renameNode = useFlowStore((s) => s.renameNode);
   const { hass, entities } = useHass();
 
   // Use entities from hass object directly
@@ -74,12 +76,39 @@ export function PropertyPanel() {
     return baseHandled;
   }, [selectedNode]);
 
+  // Ensure hooks are always called in the same order across renders.
+  // Initialize `idInput` to an empty string and sync when a node is selected.
+  const [idInput, setIdInput] = useState<string>('');
+
+  useEffect(() => {
+    if (selectedNode?.id) {
+      setIdInput(selectedNode.id);
+    } else {
+      setIdInput('');
+    }
+  }, [selectedNode?.id]);
+
   if (!selectedNode) {
     return <AutomationSettingsPanel />;
   }
 
   const handleChange = (key: string, value: unknown) => {
     updateNodeData(selectedNode.id, { [key]: value });
+  };
+
+  const applyRename = (value: string) => {
+    const newId = String(value || '').trim();
+    if (!newId || newId === selectedNode.id) {
+      setIdInput(selectedNode.id);
+      return;
+    }
+    try {
+      renameNode(selectedNode.id, newId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to rename node';
+      toast.error(message);
+      setIdInput(selectedNode.id);
+    }
   };
 
   const handleDeleteProperty = (key: string) => {
@@ -116,13 +145,14 @@ export function PropertyPanel() {
         />
       </FormField>
 
-      {/* ID field - not applicable for action nodes */}
+      {/* ID field - not applicable for action nodes. Allows renaming the node's internal id. */}
       {selectedNode.type !== 'action' && (
         <FormField label={t('labels.id')}>
           <Input
             type="text"
-            value={typeof selectedNode.data.id === 'string' ? selectedNode.data.id : ''}
-            onChange={(e) => handleChange('id', e.target.value || undefined)}
+            value={idInput}
+            onChange={(e) => setIdInput(e.target.value)}
+            onBlur={(e) => applyRename(e.target.value)}
             placeholder={t('placeholders.optionalUniqueId')}
             className="font-mono"
           />
